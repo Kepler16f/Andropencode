@@ -95,9 +95,10 @@ jobs:
       - name: Assemble release APK
         # Phase 0: ship universal APK to verify the toolchain. Per-ABI matrix
         # + abiFilters wiring lands in Phase 1 once the basic build is green.
+        # ANDROID_SDK_ROOT is set by setup-android above; do NOT also set
+        # ANDROID_HOME to a different value or Gradle will refuse with
+        # "Several environment variables ... contain different paths to the SDK".
         working-directory: packages/mobile/android
-        env:
-          ANDROID_HOME: ${{ steps.setup-android.outputs.android-home }}
         run: |
           ./gradlew \
             :app:assembleRelease \

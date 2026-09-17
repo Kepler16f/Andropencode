@@ -87,11 +87,11 @@ jobs:
           fi
 
       - name: Sync web assets into android/
-        # Use Capacitor's `cap sync` (not our custom copy script) so the
-        # generated `capacitor.settings.gradle` and plugin wiring are produced.
-        # `cap sync android` runs `cap copy android` then `cap update android`,
-        # which both refresh webDir assets and emit the Capacitor Gradle include.
-        run: cd packages/mobile && bunx cap sync android
+        # `cap add android` does not create the web assets directory. `cap sync`
+        # refuses to run if `webDir` is missing. mkdir first, then run sync.
+        run: |
+          mkdir -p packages/mobile/android/app/src/main/assets/public
+          cd packages/mobile && bunx cap sync android
 
       - name: Assemble release APK
         # Phase 0: ship universal APK to verify the toolchain. Per-ABI matrix

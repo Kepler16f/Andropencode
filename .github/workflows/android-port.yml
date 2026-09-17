@@ -87,11 +87,10 @@ jobs:
           fi
 
       - name: Sync web assets into android/
-        # `cap add android` does not create the web assets directory. `cap sync`
-        # refuses to run if `webDir` is missing. mkdir first, then run sync.
-        run: |
-          mkdir -p packages/mobile/android/app/src/main/assets/public
-          cd packages/mobile && bunx cap sync android
+        # `cap sync` reads from capacitor.config.ts webDir (../app/dist, the
+        # build output of packages/app) and copies into android/app/src/main/
+        # assets/public. It also generates capacitor.settings.gradle.
+        run: cd packages/mobile && bunx cap sync android
 
       - name: Assemble release APK
         # Phase 0: ship universal APK to verify the toolchain. Per-ABI matrix

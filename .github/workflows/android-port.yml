@@ -22,8 +22,11 @@ jobs:
     timeout-minutes: 90
     strategy:
       fail-fast: false
+      # Phase 1: ship arm64-v8a only — other ABIs will be enabled after the
+      # full toolchain proves itself. Update the matrix once gradle + cap add
+      # are stable and splits.abi is wired into build.gradle.kts.
       matrix:
-        abi: [arm64-v8a, armeabi-v7a, x86_64]
+        abi: [arm64-v8a]
 
     steps:
       - name: Checkout
@@ -41,7 +44,12 @@ jobs:
           java-version: "17"
 
       - name: Setup Android SDK
+        id: setup-android
         uses: android-actions/setup-android@v3
+        with:
+          # Capacitor 6 targets API 34. Pin to known versions to avoid surprises.
+          api-level: 34
+          build-tools-version: 34.0.0
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -49,18 +57,18 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/gradle/wrapper/gradle-wrapper.properties') }}
           restore-keys: |
             gradle-${{ runner.os }}-
 
       - name: Install workspace deps
-        run: bun install --frozen-lockfile
+        # First run needs to refresh the lockfile because packages/mobile was
+        # just added with new catalog entries. After that, switch back to
+        # `--frozen-lockfile` to detect unwanted dependency drift.
+        run: bun install
 
       - name: Build packages/app
         run: bun --cwd packages/app build
-
-      - name: Install mobile deps
-        run: bun install --cwd packages/mobile --no-save
 
       - name: Scaffold Android project (idempotent)
         run: |
@@ -75,13 +83,14 @@ jobs:
         run: bun --cwd packages/mobile run copy:web
 
       - name: Assemble release APK
+        # Phase 0: ship universal APK to verify the toolchain. Per-ABI matrix
+        # + abiFilters wiring lands in Phase 1 once the basic build is green.
         working-directory: packages/mobile/android
         env:
           ANDROID_HOME: ${{ steps.setup-android.outputs.android-home }}
         run: |
           ./gradlew \
             :app:assembleRelease \
-            -PreactNativeArchitectures=${{ matrix.abi }} \
             --no-daemon \
             --stacktrace
 
@@ -89,7 +98,8 @@ jobs:
         working-directory: packages/mobile/android
         run: |
           mkdir -p dist
-          find app/build/outputs/apk/release -name "*.apk" -exec cp {} dist/opencode-mobile-${{ matrix.abi }}.apk \;
+          find app/build/outputs/apk/release -name "*.apk" -exec cp {} dist/ \;
+          mv dist/*.apk dist/opencode-mobile-universal.apk 2>/dev/null || true
           ls -la dist/
 
       - name: Upload APK

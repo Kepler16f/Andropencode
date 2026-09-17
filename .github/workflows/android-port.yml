@@ -81,7 +81,7 @@ jobs:
         run: |
           if [ ! -f packages/mobile/android/build.gradle ]; then
             echo "[scaffold] first run: cap add android"
-            bun --cwd packages/mobile x cap add android
+            cd packages/mobile && bunx cap add android
           else
             echo "[scaffold] android/ already present, skipping"
           fi

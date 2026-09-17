@@ -1,0 +1,31 @@
+{
+  "name": "@opencode-ai/mobile",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Android wrapper for OpenCode: Capacitor WebView hosting packages/app, with a Kotlin foreground Service that runs the opencode server on-device via Bun.",
+  "scripts": {
+    "cap:sync": "cap sync android",
+    "cap:add:android": "cap add android",
+    "build:web": "bun --cwd ../app build",
+    "copy:web": "node ./scripts/copy-web.mjs",
+    "prebuild": "bun run build:web && bun run copy:web",
+    "build": "bun run prebuild",
+    "typecheck": "tsgo --noEmit"
+  },
+  "dependencies": {
+    "@capacitor/android": "catalog:",
+    "@capacitor/app": "catalog:",
+    "@capacitor/core": "catalog:",
+    "@capacitor/dialog": "catalog:",
+    "@capacitor/filesystem": "catalog:",
+    "@capacitor/keyboard": "catalog:",
+    "@capacitor/preferences": "catalog:",
+    "@capacitor/share": "catalog:"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "catalog:",
+    "typescript": "catalog:"
+  }
+}

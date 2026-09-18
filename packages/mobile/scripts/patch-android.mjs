@@ -17,10 +17,12 @@ import { resolve, dirname, join } from "node:path"
 const projectRoot = resolve(import.meta.dirname, "..", "..", "..")
 const androidApp = resolve(projectRoot, "packages", "mobile", "android-app")
 
-// Hard-coded for now — Phase 3 should read these from package.json or a
-// dedicated version manifest that the user maintains alongside the source.
-const VERSION_NAME = "0.1.1"
-const VERSION_CODE = 101
+// User-supplied for the current build cycle. The agent is required (see
+// AGENTS.md "Build-trigger discipline") to ask the user for these values
+// before each release / dispatch / tag push rather than auto-incrementing
+// from the previous run.
+const VERSION_NAME = "0.3.0"
+const VERSION_CODE = 300
 const androidOut = resolve(projectRoot, "packages", "mobile", "android")
 
 async function exists(p) {

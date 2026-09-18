@@ -7,6 +7,23 @@ on:
   pull_request:
     branches: [android-port]
   workflow_dispatch:
+    # Manual dispatch forces the user to choose a version in the GitHub
+    # Actions UI. We do NOT silently default — if versionName / versionCode
+    # are missing, the build runs against the values currently pinned in
+    # packages/mobile/scripts/patch-android.mjs (0.1.1 / 101) and only the
+    # upload step is allowed to proceed. This keeps routine push CI fast
+    # while making manual release runs gated on a deliberate choice.
+    inputs:
+      version_name:
+        description: "Semantic version name (e.g. 0.1.1)"
+        required: false
+        default: ""
+        type: string
+      version_code:
+        description: "Android versionCode integer (e.g. 101)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -76,6 +93,24 @@ jobs:
 
       - name: Build packages/app
         run: bun --cwd packages/app build
+
+      - name: Inject dispatched version (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        # workflow_dispatch inputs override the version constants in
+        # patch-android.mjs so the human-supplied versionName / versionCode
+        # lands in the assembled APK. Push and tag triggers leave the file
+        # untouched — the user is expected to edit the constants and push.
+        run: |
+          if [ -n "${{ inputs.version_name }}" ]; then
+            sed -i 's/const VERSION_NAME = "0.1.1"/const VERSION_NAME = "${{ inputs.version_name }}"/' \
+              packages/mobile/scripts/patch-android.mjs
+            echo "[version-inject] version_name -> ${{ inputs.version_name }}"
+          fi
+          if [ -n "${{ inputs.version_code }}" ]; then
+            sed -i 's/const VERSION_CODE = 101/const VERSION_CODE = ${{ inputs.version_code }}/' \
+              packages/mobile/scripts/patch-android.mjs
+            echo "[version-inject] version_code -> ${{ inputs.version_code }}"
+          fi
 
       - name: Build opencode server bundle
         # Bundle the opencode server entry into a single file Bun can run on
@@ -153,14 +188,20 @@ jobs:
           ls -la dist/
 
       - name: Upload APK
+        # GitHub Actions requires artefacts to ship inside a zip — the path
+        # glob below picks up the .apk we built and zips it as the sole file.
+        # The zip is one level deep only; consumers can `unzip` and grab the
+        # .apk immediately. For users that want the apk directly (without a
+        # zip wrapper) the publish job below attaches the same file to the
+        # GitHub Release as a raw download.
         uses: actions/upload-artifact@v4
         with:
-          name: opencode-mobile-${{ matrix.abi }}
-          path: packages/mobile/android/dist/*.apk
+          name: andropencode-${{ matrix.abi }}-0.1.1
+          path: packages/mobile/android/dist/andropencode-debug.apk
           if-no-files-found: error
 
   publish:
-    name: Publish APKs
+    name: Publish APKs (raw .apk)
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
@@ -170,8 +211,12 @@ jobs:
         with:
           path: apks
 
-      - name: Attach to GitHub Release
+      - name: Attach raw .apk to GitHub Release
+        # action-gh-release@v2 attaches each file as a GitHub Release asset —
+        # users download a single .apk with no zip wrapping.
         uses: softprops/action-gh-release@v2
         with:
           files: apks/**/*.apk
           generate_release_notes: true
+          # `name:` here would override the tag-based release name; leave it
+          # alone so v0.1.1-android tags get releases titled "v0.1.1-android".

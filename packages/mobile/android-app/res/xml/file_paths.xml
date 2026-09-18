@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  FileProvider paths. Capacitor uses this for plugin-mediated file access
+  (e.g. Filesystem plugin handing a content:// URI to the WebView). Phase 1
+  registers the provider; Phase 2 wires SAF on top of it.
+-->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="files" path="." />
+    <cache-path name="cache" path="." />
+    <external-files-path name="ext_files" path="." />
+</paths>

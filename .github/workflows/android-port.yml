@@ -82,9 +82,23 @@ jobs:
           if [ ! -f packages/mobile/android/build.gradle ]; then
             echo "[scaffold] first run: cap add android"
             cd packages/mobile && bunx cap add android
+            # First run only — commit the generated android/ tree so subsequent
+            # runs reuse it and reviewers can see what we generated.
+            cd "$GITHUB_WORKSPACE"
+            git add packages/mobile/android
+            git -c user.name="Mavis" -c user.email="Mavis@local" \
+              commit -m "chore(mobile): track Capacitor-generated android/ tree" \
+                --no-verify || echo "no changes to commit"
+            git push origin android-port
           else
             echo "[scaffold] android/ already present, skipping"
           fi
+
+      - name: Patch android/ with Phase 1 Kotlin sidecar
+        # Overlays our MainActivity / OpencodeService / BunDownloader /
+        # LocalReverseProxy onto the generated tree, plus an AndroidManifest
+        # template that registers the foreground service.
+        run: node packages/mobile/scripts/patch-android.mjs
 
       - name: Sync web assets into android/
         # `cap sync` reads from capacitor.config.ts webDir (../app/dist, the

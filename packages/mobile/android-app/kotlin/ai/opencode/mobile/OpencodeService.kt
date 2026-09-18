@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
@@ -15,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -22,7 +24,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.net.InetSocketAddress
 import java.net.ServerSocket
+import java.net.Socket
 
 /**
  * Foreground service that hosts the Bun runtime for OpenCode Mobile.
@@ -56,6 +60,12 @@ class OpencodeService : Service() {
             } else {
                 context.startService(intent)
             }
+        }
+
+        fun readVersionName(context: Context): String = try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: "?"
+        } catch (e: PackageManager.NameNotFoundException) {
+            "?"
         }
     }
 
@@ -178,6 +188,21 @@ class OpencodeService : Service() {
         // Drain Bun's combined stdout+stderr into logcat so we can debug
         // failures (`adb logcat -s OpencodeServer`) without a USB shell.
         scope.launch { pumpServerLog(bunProcess!!.inputStream) }
+
+        // Block (with timeout) until the server actually accepts TCP
+        // connections on 127.0.0.1:4096. Without this the notification
+        // would just say "Server starting…" forever and the user would
+        // not know whether the Bun process is healthy, slow, or dead.
+        try {
+            waitForServerReady(SERVER_PORT, timeoutMs = 30_000)
+            Log.i(TAG, "Server ready on 127.0.0.1:$SERVER_PORT (pid=${bunProcess!!.pid()})")
+            updateNotification("Server ready · v" + readVersionName(this))
+        } catch (e: Exception) {
+            Log.e(TAG, "Server failed to start listening on 127.0.0.1:$SERVER_PORT within 30s", e)
+            updateNotification("Server start failed")
+            // Keep the process around so the user can read logcat; the
+            // service remains alive (START_STICKY) so they can pull logs.
+        }
     }.onFailure { e ->
         Log.e(TAG, "runtimeJob failed", e)
         updateNotification("Runtime error: ${e.message}")
@@ -190,6 +215,34 @@ class OpencodeService : Service() {
                 Log.i(SERVER_TAG, line)
             }
         }
+    }
+
+    /**
+     * Repeatedly try to open a TCP socket to 127.0.0.1:port. Returns when
+     * the socket connects; throws after [timeoutMs]. This tells us the
+     * Bun process really did manage to call `listen()`, which the
+     * "Server starting…" notification alone cannot distinguish from
+     * "Bun is hung during module evaluation".
+     */
+    private suspend fun waitForServerReady(port: Int, timeoutMs: Long) {
+        val deadline = System.currentTimeMillis() + timeoutMs
+        var attempt = 0
+        while (System.currentTimeMillis() < deadline) {
+            attempt++
+            try {
+                Socket().use { sock ->
+                    sock.connect(InetSocketAddress("127.0.0.1", port), 1_000)
+                }
+                Log.i(TAG, "waitForServerReady: connected on attempt $attempt")
+                return
+            } catch (e: Exception) {
+                if (attempt % 10 == 1) {
+                    Log.d(TAG, "waitForServerReady: attempt $attempt, $e")
+                }
+                delay(500)
+            }
+        }
+        throw RuntimeException("Server did not accept connections on 127.0.0.1:$port within ${timeoutMs}ms")
     }
 }
 

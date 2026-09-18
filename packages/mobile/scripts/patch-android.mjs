@@ -7,7 +7,7 @@
 // This script is idempotent — re-running it after the initial cap add just
 // overwrites the same files.
 
-import { cp, mkdir, readdir, writeFile, stat } from "node:fs/promises"
+import { cp, mkdir, readdir, writeFile, stat, readFile } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { resolve, dirname, join } from "node:path"
 
@@ -16,6 +16,11 @@ import { resolve, dirname, join } from "node:path"
 // levels (scripts → mobile → packages → <root>).
 const projectRoot = resolve(import.meta.dirname, "..", "..", "..")
 const androidApp = resolve(projectRoot, "packages", "mobile", "android-app")
+
+// Hard-coded for now — Phase 3 should read these from package.json or a
+// dedicated version manifest that the user maintains alongside the source.
+const VERSION_NAME = "0.1.1"
+const VERSION_CODE = 101
 const androidOut = resolve(projectRoot, "packages", "mobile", "android")
 
 async function exists(p) {
@@ -81,6 +86,24 @@ async function main() {
   const assetsSrc = resolve(androidApp, "assets")
   if (await exists(assetsSrc)) {
     await copyDir(assetsSrc, resolve(androidOut, "app", "src", "main", "assets"))
+  }
+
+  // 5. Inject versionName / versionCode into the generated app/build.gradle
+  //    so the APK reports the user-facing version. Capacitor's default
+  //    template ships versionCode = 1, versionName = "1.0" which is what
+  //    Google Play would publish if we forgot to override it.
+  const appGradle = resolve(androidOut, "app", "build.gradle")
+  if (await exists(appGradle)) {
+    const before = await readFile(appGradle, "utf8")
+    let after = before
+    after = after.replace(/versionCode\s*=\s*\d+/, `versionCode = ${VERSION_CODE}`)
+    after = after.replace(/versionName\s*=\s*"[^"]*"/, `versionName = "${VERSION_NAME}"`)
+    if (after !== before) {
+      await writeFile(appGradle, after, "utf8")
+      console.log(`[patch-android] versionCode=${VERSION_CODE}, versionName="${VERSION_NAME}"`)
+    } else {
+      console.log("[patch-android] versionCode/versionName not found in app/build.gradle (template may have changed)")
+    }
   }
 
   console.log("[patch-android] done.")

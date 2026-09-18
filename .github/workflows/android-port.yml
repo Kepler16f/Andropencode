@@ -162,7 +162,17 @@ jobs:
         # tree, plus an AndroidManifest template that registers the foreground
         # service. Must run after `cap sync` because cap sync overwrites
         # strings.xml from capacitor.config.ts appName.
-        run: node packages/mobile/scripts/patch-android.mjs
+        id: patch
+        run: |
+          node packages/mobile/scripts/patch-android.mjs
+          # Expose the version the script pinned so downstream steps (artifact
+          # name, release notes) can reference a single source of truth rather
+          # than hardcoding 0.1.1 / 0.3.0 / … in the workflow file.
+          VERSION_NAME=$(grep -E '^\s*const VERSION_NAME' packages/mobile/scripts/patch-android.mjs | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          VERSION_CODE=$(grep -E '^\s*const VERSION_CODE' packages/mobile/scripts/patch-android.mjs | head -1 | sed -E 's/.*=\s*([0-9]+).*/\1/')
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "[patch-android] exposed version_name=$VERSION_NAME, version_code=$VERSION_CODE"
 
       - name: Assemble debug APK
         # We use assembleDebug (not Release) for Phase 1/2 because the release
@@ -196,7 +206,7 @@ jobs:
         # GitHub Release as a raw download.
         uses: actions/upload-artifact@v4
         with:
-          name: andropencode-${{ matrix.abi }}-0.1.1
+          name: andropencode-${{ matrix.abi }}-${{ steps.patch.outputs.version_name }}
           path: packages/mobile/android/dist/andropencode-debug.apk
           if-no-files-found: error
 

@@ -11,7 +11,10 @@ import { cp, mkdir, readdir, writeFile, stat } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { resolve, dirname, join } from "node:path"
 
-const projectRoot = resolve(import.meta.dirname, "..", "..")
+// Resolve from packages/mobile/scripts/ up to the repo root.
+// import.meta.dirname is ".../packages/mobile/scripts", so we go up three
+// levels (scripts → mobile → packages → <root>).
+const projectRoot = resolve(import.meta.dirname, "..", "..", "..")
 const androidApp = resolve(projectRoot, "packages", "mobile", "android-app")
 const androidOut = resolve(projectRoot, "packages", "mobile", "android")
 

@@ -164,7 +164,18 @@ jobs:
         # strings.xml from capacitor.config.ts appName.
         id: patch
         run: |
+          # Dump the app/build.gradle version block BEFORE patching so we can
+          # see in CI logs exactly what cap add generated and what the
+          # patch-android regex rewrote it to. This is the single best way
+          # to confirm the version injection actually took effect.
+          echo "[patch] app/build.gradle defaultConfig BEFORE patch:"
+          grep -A1 -B1 -E '^\s*version' packages/mobile/android/app/build.gradle | sed 's/^/    /'
+
           node packages/mobile/scripts/patch-android.mjs
+
+          echo "[patch] app/build.gradle defaultConfig AFTER patch:"
+          grep -A1 -B1 -E '^\s*version' packages/mobile/android/app/build.gradle | sed 's/^/    /'
+
           # Expose the version the script pinned so downstream steps (artifact
           # name, release notes) can reference a single source of truth rather
           # than hardcoding 0.1.1 / 0.3.0 / … in the workflow file.

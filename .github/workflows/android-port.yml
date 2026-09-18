@@ -79,16 +79,21 @@ jobs:
 
       - name: Build opencode server bundle
         # Bundle the opencode server entry into a single file Bun can run on
-        # Android. `--external sqlite` keeps the bun:sqlite builtin intact; any
-        # other platform-native deps get bundled.
+        # Android. `--outdir` (not `--outfile`) because `bun build` emits
+        # multiple artefacts alongside the JS (e.g. source maps) for any
+        # non-trivial tree and refuses `--outfile` in that case.
         run: |
+          rm -rf packages/mobile/android-app/assets/server
           mkdir -p packages/mobile/android-app/assets/server
           bun build packages/opencode/src/cli/cmd/serve.ts \
             --target=bun \
-            --outfile packages/mobile/android-app/assets/server/opencode-server.js \
+            --outdir packages/mobile/android-app/assets/server \
             --external @lydell/node-pty \
             --external @parcel/watcher
           ls -lh packages/mobile/android-app/assets/server/
+          # Print which files came out so we can pick the right one in
+          # OpencodeService.
+          find packages/mobile/android-app/assets/server -maxdepth 1 -type f
 
       - name: Scaffold Android project (idempotent)
         run: |

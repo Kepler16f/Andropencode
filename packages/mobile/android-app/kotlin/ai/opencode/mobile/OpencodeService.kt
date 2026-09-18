@@ -17,7 +17,11 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import java.io.BufferedReader
 import java.io.File
+import java.io.InputStreamReader
 import java.net.ServerSocket
 
 /**
@@ -27,18 +31,20 @@ import java.net.ServerSocket
  *   1. [start] is invoked from [MainActivity.onCreate]. Promotes to a foreground
  *      service so Android does not kill us when the activity backgrounds.
  *   2. On a worker coroutine we (a) ensure the Bun binary is present on disk
- *      via [BunDownloader], (b) spawn the Bun process, and (c) wait for the
- *      server socket to bind on 127.0.0.1:4096.
- *   3. While the service is alive, the [LocalReverseProxy] inside the WebView
- *      forwards `https://opencode.local/*` requests to 127.0.0.1:4096.
+ *      via [BunDownloader], (b) spawn the Bun process with HOME=/ XDG_* env
+ *      pointing at the app's filesDir, (c) bind 127.0.0.1:4096, (d) stream
+ *      the server's stdout/stderr into logcat so we can diagnose Android
+ *      runtime issues without a USB cable.
+ *   3. While the service is alive, the WebView at
+ *      http://127.0.0.1:4096 talks to the server directly.
  *
- * Phase 1 keeps the implementation minimal — process supervision, restart on
- * crash, and PTY plumbing land in Phase 2.
+ * Phase 2: server boots + serves SPA. Phase 3 will hook SAF / ripgrep here.
  */
 class OpencodeService : Service() {
 
     companion object {
         private const val TAG = "OpencodeService"
+        private const val SERVER_TAG = "OpencodeServer"
         private const val CHANNEL_ID = "opencode-runtime"
         private const val NOTIF_ID = 0x10C42
         const val SERVER_PORT = 4096
@@ -118,8 +124,7 @@ class OpencodeService : Service() {
             return@runCatching
         }
 
-        // 2. Make sure the bundled server JS exists on disk (extracted from
-        //    APK assets on first launch).
+        // 2. Materialise the bundled server JS on disk.
         val serverScript = OpencodeServerInitializer.ensureServerBundle(this, filesDir)
         if (serverScript == null) {
             Log.e(TAG, "Server bundle unavailable — runtime not started")
@@ -137,8 +142,11 @@ class OpencodeService : Service() {
             return@runCatching
         }
 
-        // 4. Spawn Bun with the opencode server entry, serving only on
-        //    127.0.0.1:4096 so the WebView proxy is the only client.
+        // 4. Spawn Bun with the opencode server entry. Android's `os.homedir()`
+        //    resolves to "/" or "/data" which makes opencode store config +
+        //    sessions in unreachable places; we force HOME / XDG_* to the app's
+        //    private filesDir. Phase 3 also routes the server's stdout/stderr
+        //    into logcat so we can debug without a USB cable.
         val pb = ProcessBuilder(
             bunBinary.absolutePath,
             "run",
@@ -146,14 +154,43 @@ class OpencodeService : Service() {
             "serve",
             "--port", SERVER_PORT.toString(),
             "--hostname", "127.0.0.1"
-        ).redirectErrorStream(true)
+        ).apply {
+            redirectErrorStream(true)
+            // opencode relies on Bun's stdio to surface boot errors. Android's
+            // Bun build drops stdio if we don't keep stdin / stdout / stderr
+            // attached to something readable.
+            environment()["HOME"] = filesDir.absolutePath
+            environment()["XDG_DATA_HOME"] = "${filesDir.absolutePath}/.local/share"
+            environment()["XDG_CONFIG_HOME"] = "${filesDir.absolutePath}/.config"
+            environment()["XDG_STATE_HOME"] = "${filesDir.absolutePath}/.local/state"
+            environment()["XDG_CACHE_HOME"] = "${filesDir.absolutePath}/.cache"
+            // Disable optional features that touch the network or filesystem in
+            // ways Android can't satisfy. mDNS in particular needs the
+            // unprivileged port range + privileges we don't have.
+            environment()["OPENCODE_DISABLE_MDNS"] = "1"
+            environment()["OPENCODE_DISABLE_UPDATE_CHECK"] = "1"
+            environment()["OPENCODE_SERVER_PASSWORD"] = "" // disable auth in dev
+        }
         bunProcess = pb.start()
         Log.i(TAG, "Bun launching opencode server (pid=${bunProcess!!.pid()})…")
         updateNotification("Server starting…")
+
+        // Drain Bun's combined stdout+stderr into logcat so we can debug
+        // failures (`adb logcat -s OpencodeServer`) without a USB shell.
+        scope.launch { pumpServerLog(bunProcess!!.inputStream) }
     }.onFailure { e ->
         Log.e(TAG, "runtimeJob failed", e)
         updateNotification("Runtime error: ${e.message}")
     }.let { /* Job done — service stays alive via START_STICKY */ }
+
+    private fun pumpServerLog(stream: java.io.InputStream) {
+        BufferedReader(InputStreamReader(stream)).use { reader ->
+            while (true) {
+                val line = reader.readLine() ?: break
+                Log.i(SERVER_TAG, line)
+            }
+        }
+    }
 }
 
 private suspend fun OpencodeService.updateNotification(text: String) {

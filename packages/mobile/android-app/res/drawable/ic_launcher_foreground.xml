@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive Icon foreground for AndrOpencode.
+
+  The viewport is 108×108 dp but the launcher may crop the icon to a circle,
+  squircle, rounded square, or (on some OEM skins) a teardrop. Google
+  guarantees a safe zone of 66 dp centred at (54, 54) — content outside
+  that area can be clipped. We draw the opencode "O" ring at radius 22 with
+  a 7 dp line so the visible glyph comfortably fits inside the safe zone
+  (45..63 dp box).
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+        android:width="108dp"
+        android:height="108dp"
+        android:viewportWidth="108"
+        android:viewportHeight="108">
+
+    <!-- Opencode "O" — open arc stroked at radius 22, centred at (54, 54). -->
+    <path
+        android:strokeColor="#F0F6FC"
+        android:strokeWidth="7"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 54,32 a 22,22 0 1,1 -0.01,0 z" />
+
+    <!-- Terminal-style cursor caret just under the O, still inside the safe zone. -->
+    <path
+        android:strokeColor="#58A6FF"
+        android:strokeWidth="6"
+        android:strokeLineCap="square"
+        android:fillColor="#00000000"
+        android:pathData="M 50,68 L 58,68" />
+</vector>

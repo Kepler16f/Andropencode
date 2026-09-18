@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive Icon background for AndrOpencode.
+
+  Single solid colour keeps the icon recognisable across launchers and
+  avoids loading a bitmap just for a backdrop. The colour is a near-GitHub-dark
+  neutral so the white foreground ring reads with good contrast.
+
+  For 27-29 adapters the entire layer is masked by the launcher shape
+  (circle / squircle / rounded square / teardrop). For pre-O launchers the
+  mipmap-anydpi-v26 adaptive XML is ignored and the PNG fallback in
+  mipmap-*dpi takes over.
+-->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+       android:shape="rectangle">
+    <solid android:color="#0D1117" />
+</shape>

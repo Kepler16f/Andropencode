@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive Icon reference for API 26+ launchers.
+
+  Replaces the legacy mipmap-*dpi/ic_launcher.png that `cap add android`
+  emits. The two layers are masked to the launcher's chosen shape; we keep
+  all foreground content inside the 66 dp safe zone (108 dp viewport minus
+  21 dp on each side) so it survives squircle, circle, and teardrop crops.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@drawable/ic_launcher_background" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+    <monochrome android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>

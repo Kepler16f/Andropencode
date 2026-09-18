@@ -7,7 +7,7 @@
 // This script is idempotent — re-running it after the initial cap add just
 // overwrites the same files.
 
-import { cp, mkdir, readdir, writeFile, stat } from "node:fs/promises"
+import { cp, mkdir, readdir, writeFile, stat, readFile, rm } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { resolve, dirname, join } from "node:path"
 
@@ -16,6 +16,11 @@ import { resolve, dirname, join } from "node:path"
 // levels (scripts → mobile → packages → <root>).
 const projectRoot = resolve(import.meta.dirname, "..", "..", "..")
 const androidApp = resolve(projectRoot, "packages", "mobile", "android-app")
+
+// Hard-coded for now — Phase 3 should read these from package.json or a
+// dedicated version manifest that the user maintains alongside the source.
+const VERSION_NAME = "0.1.1"
+const VERSION_CODE = 101
 const androidOut = resolve(projectRoot, "packages", "mobile", "android")
 
 async function exists(p) {
@@ -47,6 +52,28 @@ async function copyFile(src, dst) {
   console.log(`[patch-android] copy ${src} -> ${dst}`)
 }
 
+// Remove the legacy mipmap-*dpi/ic_launcher*.png that `cap add android`
+// emits. We replace them with the adaptive icon XML in res/mipmap-anydpi-v26
+// (see android-app/res/). Keeping the PNGs around would shadow the adaptive
+// icon on API 26+ launchers in some skins.
+async function removeDefaultLauncherIcons() {
+  const mipmapDir = resolve(androidOut, "app", "src", "main", "res")
+  if (!(await exists(mipmapDir))) return
+  const entries = await readdir(mipmapDir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!/^mipmap-/.test(entry.name)) continue
+    const dirPath = join(mipmapDir, entry.name)
+    const files = await readdir(dirPath)
+    for (const f of files) {
+      if (f === "ic_launcher.png" || f === "ic_launcher_round.png" || f === "ic_launcher_foreground.png" || f === "ic_launcher_background.png") {
+        await rm(join(dirPath, f), { force: true })
+        console.log(`[patch-android] remove ${join(dirPath, f)}`)
+      }
+    }
+  }
+}
+
 async function main() {
   if (!(await exists(androidOut))) {
     console.error(
@@ -75,12 +102,34 @@ async function main() {
     await copyDir(resSrc, resolve(androidOut, "app", "src", "main", "res"))
   }
 
+  // 3a. Drop the legacy PNG launcher icons that `cap add android` ships.
+  //     The adaptive XML we just copied under mipmap-anydpi-v26 takes over.
+  await removeDefaultLauncherIcons()
+
   // 4. Copy assets/ additions (e.g. assets/server/opencode-server.js).
   //    We only copy specific subdirectories to avoid clobbering the web SPA
   //    that `cap sync` writes under assets/public.
   const assetsSrc = resolve(androidApp, "assets")
   if (await exists(assetsSrc)) {
     await copyDir(assetsSrc, resolve(androidOut, "app", "src", "main", "assets"))
+  }
+
+  // 5. Inject versionName / versionCode into the generated app/build.gradle
+  //    so the APK reports the user-facing version. Capacitor's default
+  //    template ships versionCode = 1, versionName = "1.0" which is what
+  //    Google Play would publish if we forgot to override it.
+  const appGradle = resolve(androidOut, "app", "build.gradle")
+  if (await exists(appGradle)) {
+    const before = await readFile(appGradle, "utf8")
+    let after = before
+    after = after.replace(/versionCode\s*=\s*\d+/, `versionCode = ${VERSION_CODE}`)
+    after = after.replace(/versionName\s*=\s*"[^"]*"/, `versionName = "${VERSION_NAME}"`)
+    if (after !== before) {
+      await writeFile(appGradle, after, "utf8")
+      console.log(`[patch-android] versionCode=${VERSION_CODE}, versionName="${VERSION_NAME}"`)
+    } else {
+      console.log("[patch-android] versionCode/versionName not found in app/build.gradle (template may have changed)")
+    }
   }
 
   console.log("[patch-android] done.")

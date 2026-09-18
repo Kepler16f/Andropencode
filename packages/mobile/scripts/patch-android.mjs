@@ -7,7 +7,7 @@
 // This script is idempotent — re-running it after the initial cap add just
 // overwrites the same files.
 
-import { cp, mkdir, readdir, writeFile, stat, readFile } from "node:fs/promises"
+import { cp, mkdir, readdir, writeFile, stat, readFile, rm } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { resolve, dirname, join } from "node:path"
 
@@ -52,6 +52,28 @@ async function copyFile(src, dst) {
   console.log(`[patch-android] copy ${src} -> ${dst}`)
 }
 
+// Remove the legacy mipmap-*dpi/ic_launcher*.png that `cap add android`
+// emits. We replace them with the adaptive icon XML in res/mipmap-anydpi-v26
+// (see android-app/res/). Keeping the PNGs around would shadow the adaptive
+// icon on API 26+ launchers in some skins.
+async function removeDefaultLauncherIcons() {
+  const mipmapDir = resolve(androidOut, "app", "src", "main", "res")
+  if (!(await exists(mipmapDir))) return
+  const entries = await readdir(mipmapDir, { withFileTypes: true })
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (!/^mipmap-/.test(entry.name)) continue
+    const dirPath = join(mipmapDir, entry.name)
+    const files = await readdir(dirPath)
+    for (const f of files) {
+      if (f === "ic_launcher.png" || f === "ic_launcher_round.png" || f === "ic_launcher_foreground.png" || f === "ic_launcher_background.png") {
+        await rm(join(dirPath, f), { force: true })
+        console.log(`[patch-android] remove ${join(dirPath, f)}`)
+      }
+    }
+  }
+}
+
 async function main() {
   if (!(await exists(androidOut))) {
     console.error(
@@ -79,6 +101,10 @@ async function main() {
   if (await exists(resSrc)) {
     await copyDir(resSrc, resolve(androidOut, "app", "src", "main", "res"))
   }
+
+  // 3a. Drop the legacy PNG launcher icons that `cap add android` ships.
+  //     The adaptive XML we just copied under mipmap-anydpi-v26 takes over.
+  await removeDefaultLauncherIcons()
 
   // 4. Copy assets/ additions (e.g. assets/server/opencode-server.js).
   //    We only copy specific subdirectories to avoid clobbering the web SPA

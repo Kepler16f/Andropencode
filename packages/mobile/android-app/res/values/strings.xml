@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  App-level strings. Overrides what `cap add android` generates from
+  capacitor.config.ts `appName`, so the label shown on the launcher icon
+  is "AndrOpencode" regardless of what name the Capacitor CLI substitutes.
+-->
+<resources>
+    <string name="app_name">AndrOpencode</string>
+    <string name="title_activity_main">AndrOpencode</string>
+    <string name="package_name">ai.opencode.mobile</string>
+    <string name="custom_url_scheme">ai.opencode.mobile</string>
+</resources>

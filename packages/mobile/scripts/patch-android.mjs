@@ -75,6 +75,14 @@ async function main() {
     await copyDir(resSrc, resolve(androidOut, "app", "src", "main", "res"))
   }
 
+  // 4. Copy assets/ additions (e.g. assets/server/opencode-server.js).
+  //    We only copy specific subdirectories to avoid clobbering the web SPA
+  //    that `cap sync` writes under assets/public.
+  const assetsSrc = resolve(androidApp, "assets")
+  if (await exists(assetsSrc)) {
+    await copyDir(assetsSrc, resolve(androidOut, "app", "src", "main", "assets"))
+  }
+
   console.log("[patch-android] done.")
 }
 

@@ -77,6 +77,19 @@ jobs:
       - name: Build packages/app
         run: bun --cwd packages/app build
 
+      - name: Build opencode server bundle
+        # Bundle the opencode server entry into a single file Bun can run on
+        # Android. `--external sqlite` keeps the bun:sqlite builtin intact; any
+        # other platform-native deps get bundled.
+        run: |
+          mkdir -p packages/mobile/android-app/assets/server
+          bun build packages/opencode/src/cli/cmd/serve.ts \
+            --target=bun \
+            --outfile packages/mobile/android-app/assets/server/opencode-server.js \
+            --external @lydell/node-pty \
+            --external @parcel/watcher
+          ls -lh packages/mobile/android-app/assets/server/
+
       - name: Scaffold Android project (idempotent)
         run: |
           if [ ! -f packages/mobile/android/build.gradle ]; then
@@ -94,28 +107,35 @@ jobs:
             echo "[scaffold] android/ already present, skipping"
           fi
 
-      - name: Patch android/ with Phase 1 Kotlin sidecar
-        # Overlays our MainActivity / OpencodeService / BunDownloader /
-        # LocalReverseProxy onto the generated tree, plus an AndroidManifest
-        # template that registers the foreground service.
-        run: node packages/mobile/scripts/patch-android.mjs
-
       - name: Sync web assets into android/
         # `cap sync` reads from capacitor.config.ts webDir (../app/dist, the
         # build output of packages/app) and copies into android/app/src/main/
-        # assets/public. It also generates capacitor.settings.gradle.
+        # assets/public. It also generates capacitor.settings.gradle and
+        # *regenerates* res/values/strings.xml from capacitor.config.ts appName.
+        # Run BEFORE patch-android so our overlay (with custom strings.xml,
+        # ForegroundService, etc.) lands last.
         run: cd packages/mobile && bunx cap sync android
 
-      - name: Assemble release APK
-        # Phase 0: ship universal APK to verify the toolchain. Per-ABI matrix
-        # + abiFilters wiring lands in Phase 1 once the basic build is green.
+      - name: Patch android/ with Phase 1 Kotlin sidecar
+        # Overlays our MainActivity / OpencodeService / BunDownloader /
+        # LocalReverseProxy / OpencodeServerInitializer onto the generated
+        # tree, plus an AndroidManifest template that registers the foreground
+        # service. Must run after `cap sync` because cap sync overwrites
+        # strings.xml from capacitor.config.ts appName.
+        run: node packages/mobile/scripts/patch-android.mjs
+
+      - name: Assemble debug APK
+        # We use assembleDebug (not Release) for Phase 1/2 because the release
+        # signing config is intentionally empty — an unsigned APK won't install
+        # on Android 7+. Switching to a real release key is a Phase 3 concern
+        # (sideload distribution doesn't require Play Store keys).
         # ANDROID_SDK_ROOT is set by setup-android above; do NOT also set
         # ANDROID_HOME to a different value or Gradle will refuse with
         # "Several environment variables ... contain different paths to the SDK".
         working-directory: packages/mobile/android
         run: |
           ./gradlew \
-            :app:assembleRelease \
+            :app:assembleDebug \
             --no-daemon \
             --stacktrace
 
@@ -123,8 +143,8 @@ jobs:
         working-directory: packages/mobile/android
         run: |
           mkdir -p dist
-          find app/build/outputs/apk/release -name "*.apk" -exec cp {} dist/ \;
-          mv dist/*.apk dist/opencode-mobile-universal.apk 2>/dev/null || true
+          find app/build/outputs/apk/debug -name "*.apk" -exec cp {} dist/ \;
+          mv dist/*.apk dist/andropencode-debug.apk 2>/dev/null || true
           ls -la dist/
 
       - name: Upload APK

@@ -118,7 +118,16 @@ class OpencodeService : Service() {
             return@runCatching
         }
 
-        // 2. Pre-flight: bind 127.0.0.1:4096 so the WebView proxy has somewhere
+        // 2. Make sure the bundled server JS exists on disk (extracted from
+        //    APK assets on first launch).
+        val serverScript = OpencodeServerInitializer.ensureServerBundle(this, filesDir)
+        if (serverScript == null) {
+            Log.e(TAG, "Server bundle unavailable — runtime not started")
+            updateNotification("Server bundle missing")
+            return@runCatching
+        }
+
+        // 3. Pre-flight: bind 127.0.0.1:4096 so the WebView proxy has somewhere
         //    to forward to before Bun is ready.
         try {
             serverSocket = ServerSocket(SERVER_PORT, 0, java.net.InetAddress.getByName("127.0.0.1"))
@@ -128,16 +137,19 @@ class OpencodeService : Service() {
             return@runCatching
         }
 
-        // 3. Spawn Bun with the opencode server entry. The actual script path is
-        //    wired up later; for now we run `bun --version` to prove the
-        //    binary launches under Bionic.
-        val pb = ProcessBuilder(bunBinary.absolutePath, "--version")
-            .redirectErrorStream(true)
+        // 4. Spawn Bun with the opencode server entry, serving only on
+        //    127.0.0.1:4096 so the WebView proxy is the only client.
+        val pb = ProcessBuilder(
+            bunBinary.absolutePath,
+            "run",
+            serverScript.absolutePath,
+            "serve",
+            "--port", SERVER_PORT.toString(),
+            "--hostname", "127.0.0.1"
+        ).redirectErrorStream(true)
         bunProcess = pb.start()
-        val out = bunProcess!!.inputStream.bufferedReader().readText()
-        Log.i(TAG, "Bun launched: ${out.trim()}")
-
-        updateNotification("Bun ${out.trim().lines().lastOrNull().orEmpty()}")
+        Log.i(TAG, "Bun launching opencode server (pid=${bunProcess!!.pid()})…")
+        updateNotification("Server starting…")
     }.onFailure { e ->
         Log.e(TAG, "runtimeJob failed", e)
         updateNotification("Runtime error: ${e.message}")

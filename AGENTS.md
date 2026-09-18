@@ -204,3 +204,19 @@ Target: run the full opencode agent natively on Android — Bun 1.4 server hoste
 - Phase 1: `./gradlew assembleDebug` produces a working APK from `packages/mobile`; empty Capacitor WebView loads `packages/app` build output.
 - Phase 2: Kotlin sidecar starts a Bun process; reverse-proxy reaches `127.0.0.1:4096`; `packages/server` HTTP API responds from inside the WebView.
 - Phase 3: PTY WebSocket reachable, ghostty-web renders ANSI output from a real shell, full session lifecycle works on a Pixel-class device.
+
+**Build-trigger discipline — version is decided by the user, not the agent**
+
+Before **any** action that produces an Android / iOS / desktop release artefact, the agent **must** ask the user for `versionName` and `versionCode` and wait for an explicit answer. This applies to:
+
+- Triggering a `workflow_dispatch` workflow on `andropencode` (or any future release workflow).
+- Pushing a `v*-android*` tag that releases APKs.
+- Running `./gradlew assembleRelease`, `bundleRelease`, or any local release build that would emit a publishable APK / AAB / IPA / installer.
+- Running `gh workflow run`, `gh release create`, or `git push` with the intent to publish.
+
+Concretely:
+1. **Do not** infer version from `git rev-parse --short HEAD`, from `bun.lock` hashes, from previous workflow runs, or from "the obvious next minor".
+2. **Do not** use placeholders like `0.0.0-dev` or `0.1.0-rc1`; if the user has not spoken, the agent asks.
+3. The user may answer with a `versionName` only — the agent then proposes a `versionCode` derived from that name (e.g. `0.1.1` → `101`) and confirms before triggering the build.
+4. The chosen pair is then injected into `packages/mobile/scripts/patch-android.mjs` (`VERSION_NAME` / `VERSION_CODE`) for that build cycle, and committed in the same change as the workflow that consumes it.
+5. After the build, the workflow must not silently overwrite the version back to a default — the `patch-android` step reads from the script's constants, and the user can change those constants before the next push.

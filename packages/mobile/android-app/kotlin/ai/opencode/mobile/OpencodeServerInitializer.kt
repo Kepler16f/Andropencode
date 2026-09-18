@@ -21,9 +21,12 @@ import java.io.FileOutputStream
 object OpencodeServerInitializer {
 
     private const val TAG = "OpencodeServerInit"
-    private const val ASSET_PATH = "server/opencode-server.js"
+    // Asset path matches what `bun build packages/opencode/src/cli/cmd/serve.ts
+    // --target=bun --outdir …` emits: the bundle file is named after the
+    // entry file (serve.js), not after the binary command name.
+    private const val ASSET_PATH = "server/serve.js"
     private const val TARGET_DIR = "server"
-    private const val TARGET_FILE = "opencode-server.js"
+    private const val TARGET_FILE = "serve.js"
 
     /**
      * @return path to the materialized server JS, or `null` on extraction

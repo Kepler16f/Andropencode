@@ -10,17 +10,17 @@ on:
     # Manual dispatch forces the user to choose a version in the GitHub
     # Actions UI. We do NOT silently default — if versionName / versionCode
     # are missing, the build runs against the values currently pinned in
-    # packages/mobile/scripts/patch-android.mjs (0.1.1 / 101) and only the
+    # packages/mobile/scripts/patch-android.mjs (0.3.0 / 300) and only the
     # upload step is allowed to proceed. This keeps routine push CI fast
     # while making manual release runs gated on a deliberate choice.
     inputs:
       version_name:
-        description: "Semantic version name (e.g. 0.1.1)"
+        description: "Semantic version name (e.g. 0.2.0)"
         required: false
         default: ""
         type: string
       version_code:
-        description: "Android versionCode integer (e.g. 101)"
+        description: "Android versionCode integer (e.g. 200)"
         required: false
         default: ""
         type: string
@@ -92,6 +92,12 @@ jobs:
         run: bun install
 
       - name: Build packages/app
+        env:
+          # entry.tsx reads VITE_OPENCODE_SERVER_HOST/PORT to build the
+          # getCurrentUrl() base in production; without it the SPA falls back
+          # to location.origin (http://localhost on some abstracted WebViews).
+          VITE_OPENCODE_SERVER_HOST: "127.0.0.1"
+          VITE_OPENCODE_SERVER_PORT: "4096"
         run: bun --cwd packages/app build
 
       - name: Inject dispatched version (workflow_dispatch only)
@@ -102,12 +108,12 @@ jobs:
         # untouched — the user is expected to edit the constants and push.
         run: |
           if [ -n "${{ inputs.version_name }}" ]; then
-            sed -i 's/const VERSION_NAME = "0.1.1"/const VERSION_NAME = "${{ inputs.version_name }}"/' \
+            sed -i 's/const VERSION_NAME = "[^"]*"/const VERSION_NAME = "${{ inputs.version_name }}"/' \
               packages/mobile/scripts/patch-android.mjs
             echo "[version-inject] version_name -> ${{ inputs.version_name }}"
           fi
           if [ -n "${{ inputs.version_code }}" ]; then
-            sed -i 's/const VERSION_CODE = 101/const VERSION_CODE = ${{ inputs.version_code }}/' \
+            sed -i 's/const VERSION_CODE = [0-9]*/const VERSION_CODE = ${{ inputs.version_code }}/' \
               packages/mobile/scripts/patch-android.mjs
             echo "[version-inject] version_code -> ${{ inputs.version_code }}"
           fi
@@ -117,18 +123,43 @@ jobs:
         # Android. `--outdir` (not `--outfile`) because `bun build` emits
         # multiple artefacts alongside the JS (e.g. source maps) for any
         # non-trivial tree and refuses `--outfile` in that case.
+        #
+        # `--conditions android` resolves the core package's `#pty` /
+        # `#watcher` conditional imports to the Android backends. bun@1.3.14
+        # predates Conditions support in `bun build`; on failure we fall back
+        # to the default conditions (desktop pty / watcher get rejected at
+        # runtime by Bun's loader — the app degrades to the pipe/noop
+        # fallbacks) so a green build is never held hostage to the flag.
         run: |
           rm -rf packages/mobile/android-app/assets/server
           mkdir -p packages/mobile/android-app/assets/server
-          bun build packages/opencode/src/cli/cmd/serve.ts \
+          if bun build packages/opencode/src/cli/cmd/serve.ts \
             --target=bun \
+            --conditions android \
             --outdir packages/mobile/android-app/assets/server \
             --external @lydell/node-pty \
-            --external @parcel/watcher
+            --external @parcel/watcher 2>/tmp/bun-build-conditions.log; then
+            echo "[bundle] --conditions android accepted"
+          else
+            echo "[bundle] --conditions android unsupported on bun@1.3.14, retrying without:"
+            cat /tmp/bun-build-conditions.log
+            bun build packages/opencode/src/cli/cmd/serve.ts \
+              --target=bun \
+              --outdir packages/mobile/android-app/assets/server \
+              --external @lydell/node-pty \
+              --external @parcel/watcher
+          fi
           ls -lh packages/mobile/android-app/assets/server/
           # Print which files came out so we can pick the right one in
           # OpencodeService.
           find packages/mobile/android-app/assets/server -maxdepth 1 -type f
+
+      - name: Stage native assets (arm64-v8a)
+        # Download the Termux ripgrep/pcre2/libc++ debs + node-pty prebuild and
+        # stage the files under android-app/assets/native/, where
+        # patch-android.mjs copies them into the APK. arm64-v8a only; other
+        # ABIs fall back to the non-interactive shell pipe (see README).
+        run: bash packages/mobile/scripts/stage-native-assets.sh
 
       - name: Scaffold Android project (idempotent)
         run: |
@@ -156,12 +187,13 @@ jobs:
         # ForegroundService, etc.) lands last.
         run: cd packages/mobile && bunx cap sync android
 
-      - name: Patch android/ with Phase 1 Kotlin sidecar
-        # Overlays our MainActivity / OpencodeService / BunDownloader /
-        # LocalReverseProxy / OpencodeServerInitializer onto the generated
-        # tree, plus an AndroidManifest template that registers the foreground
-        # service. Must run after `cap sync` because cap sync overwrites
-        # strings.xml from capacitor.config.ts appName.
+      - name: Patch android/ with Kotlin sidecar
+        # Overlays our MainActivity / OpencodeService / BunDownloader / bridge
+        # plugins (FsBridge, ShellBridge, Biometric) / LocalReverseProxy /
+        # OpencodeServerInitializer onto the generated tree, plus an
+        # AndroidManifest template that registers the foreground service and
+        # copies the staged native assets into the APK. Must run after `cap
+        # sync` because cap sync overwrites strings.xml from appName.
         id: patch
         run: |
           # Dump the app/build.gradle version block BEFORE patching so we can

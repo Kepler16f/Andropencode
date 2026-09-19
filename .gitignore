@@ -32,3 +32,9 @@ UPCOMING_CHANGELOG.md
 logs/
 *.bun-build
 tsconfig.tsbuildinfo
+
+# Android native asset staging — CI generates these from Termux debs / npm
+# (see packages/mobile/scripts/stage-native-assets.sh). They are ~60 MiB and
+# are never committed.
+packages/mobile/android-app/assets/native/
+packages/mobile/android-app/assets/server/

@@ -140,11 +140,20 @@ async function main() {
     after = after.replace(/versionName\s*=\s*"[^"]*"/, `versionName = "${VERSION_NAME}"`)
     after = after.replace(/namespace\s+"[^"]*"/, `namespace "${ANDROID_APP_ID}"`)
     after = after.replace(/applicationId\s+"[^"]*"/, `applicationId "${ANDROID_APP_ID}"`)
+    // 5a. Inject the AndroidX dependency needed by BiometricPlugin's
+    //      EncryptedSharedPreferences. Idempotent: skip if already present.
+    if (!after.includes("androidx.security:security-crypto")) {
+      after = after.replace(
+        /^(\s*dependencies\s*\{)/m,
+        `$1\n    implementation "androidx.security:security-crypto:1.1.0-alpha06"`,
+      )
+    }
     if (after !== before) {
       await writeFile(appGradle, after, "utf8")
       console.log(
         `[patch-android] versionCode=${VERSION_CODE}, versionName="${VERSION_NAME}", ` +
-          `namespace/applicationId=${ANDROID_APP_ID}`
+          `namespace/applicationId=${ANDROID_APP_ID}` +
+          (after.includes("androidx.security:security-crypto") ? ", +security-crypto" : ""),
       )
     } else {
       console.log("[patch-android] no version/namespace lines matched in app/build.gradle (template may have changed)")

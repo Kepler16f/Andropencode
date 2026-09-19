@@ -225,6 +225,23 @@ jobs:
           archive: false
           if-no-files-found: error
 
+      - name: Print APK manifest facts
+        # Use aapt2 from the Android SDK to dump the actual versionName /
+        # versionCode / package / sdkVersion / permissions of the APK we
+        # just built. This is the only ground-truth the user has for
+        # confirming they downloaded the right artifact — the GitHub
+        # Actions page can cache older runs and the artifact filename
+        # alone is not enough.
+        working-directory: packages/mobile/android
+        run: |
+          AAPT2="$ANDROID_HOME/build-tools/34.0.0/aapt2"
+          "$AAPT2" dump badging dist/andropencode-debug.apk 2>&1 | \
+            grep -E "package:|sdkVersion:|targetSdkVersion:|application-label:" | \
+            sed 's/^/    [apk] /'
+          echo ""
+          echo "    [apk] file size: $(stat -c %s dist/andropencode-debug.apk) bytes"
+          echo "    [apk] sha256:    $(sha256sum dist/andropencode-debug.apk | awk '{print $1}')"
+
   publish:
     name: Publish APKs (raw .apk)
     needs: build

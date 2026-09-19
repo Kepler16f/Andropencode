@@ -23,6 +23,13 @@ const androidApp = resolve(projectRoot, "packages", "mobile", "android-app")
 // from the previous run.
 const VERSION_NAME = "0.3.0"
 const VERSION_CODE = 300
+// Mirror of capacitor.config.ts `appId`. The Capacitor CLI 6.2.0 template
+// ships `namespace "com.getcapacitor.myapp"` + `applicationId
+// "com.getcapacitor.app"` and does NOT rewrite them, so we patch the
+// generated app/build.gradle to use our real application id. Keeping
+// these two in sync (capacitor.config.ts and this constant) is a Phase 3
+// chore we should automate.
+const ANDROID_APP_ID = "ai.opencode.mobile"
 const androidOut = resolve(projectRoot, "packages", "mobile", "android")
 
 async function exists(p) {
@@ -116,21 +123,31 @@ async function main() {
     await copyDir(assetsSrc, resolve(androidOut, "app", "src", "main", "assets"))
   }
 
-  // 5. Inject versionName / versionCode into the generated app/build.gradle
-  //    so the APK reports the user-facing version. Capacitor's default
-  //    template ships versionCode = 1, versionName = "1.0" which is what
-  //    Google Play would publish if we forgot to override it.
+  // 5. Inject versionName / versionCode + rewrite namespace/applicationId
+  //    on the generated app/build.gradle. The Capacitor 6.2.0 template ships
+  //    with `namespace "com.getcapacitor.myapp"` and `applicationId
+  //    "com.getcapacitor.app"` — both placeholders. `cap add` does NOT
+  //    rewrite them, so the resulting APK is built with a Java R class in
+  //    `com.getcapacitor.myapp` but installed under `ai.opencode.mobile`,
+  //    which crashes the moment Capacitor's BridgeActivity tries to inflate
+  //    any resource on Android 8+. We patch both lines so the namespace
+  //    matches capacitor.config.ts `appId`.
   const appGradle = resolve(androidOut, "app", "build.gradle")
   if (await exists(appGradle)) {
     const before = await readFile(appGradle, "utf8")
     let after = before
     after = after.replace(/versionCode\s*=\s*\d+/, `versionCode = ${VERSION_CODE}`)
     after = after.replace(/versionName\s*=\s*"[^"]*"/, `versionName = "${VERSION_NAME}"`)
+    after = after.replace(/namespace\s+"[^"]*"/, `namespace "${ANDROID_APP_ID}"`)
+    after = after.replace(/applicationId\s+"[^"]*"/, `applicationId "${ANDROID_APP_ID}"`)
     if (after !== before) {
       await writeFile(appGradle, after, "utf8")
-      console.log(`[patch-android] versionCode=${VERSION_CODE}, versionName="${VERSION_NAME}"`)
+      console.log(
+        `[patch-android] versionCode=${VERSION_CODE}, versionName="${VERSION_NAME}", ` +
+          `namespace/applicationId=${ANDROID_APP_ID}`
+      )
     } else {
-      console.log("[patch-android] versionCode/versionName not found in app/build.gradle (template may have changed)")
+      console.log("[patch-android] no version/namespace lines matched in app/build.gradle (template may have changed)")
     }
   }
 

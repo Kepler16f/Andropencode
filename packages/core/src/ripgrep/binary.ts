@@ -15,6 +15,7 @@ export namespace RipgrepBinary {
   const PLATFORM = {
     "arm64-darwin": { platform: "aarch64-apple-darwin", extension: "tar.gz" },
     "arm64-linux": { platform: "aarch64-unknown-linux-gnu", extension: "tar.gz" },
+    "arm64-android": { platform: "aarch64-linux-android", extension: "tar.gz" },
     "x64-darwin": { platform: "x86_64-apple-darwin", extension: "tar.gz" },
     "x64-linux": { platform: "x86_64-unknown-linux-musl", extension: "tar.gz" },
     "arm64-win32": { platform: "aarch64-pc-windows-msvc", extension: "zip" },
@@ -97,7 +98,9 @@ export namespace RipgrepBinary {
             const target = path.join(Global.Path.bin, `rg${process.platform === "win32" ? ".exe" : ""}`)
             if (yield* fs.isFile(target).pipe(Effect.orDie)) return target
 
-            const platformKey = `${process.arch}-${process.platform}` as keyof typeof PLATFORM
+            const platformKey = (
+              process.env.OPENCODE_ANDROID === "1" ? "arm64-android" : `${process.arch}-${process.platform}`
+            ) as keyof typeof PLATFORM
             const config = PLATFORM[platformKey]
             if (!config) throw new Error(`unsupported platform for ripgrep: ${platformKey}`)
 

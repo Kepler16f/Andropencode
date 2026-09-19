@@ -29,9 +29,16 @@
       "default": "./src/database/sqlite.bun.ts"
     },
     "#pty": {
+      "android": "./src/pty/pty.android.ts",
       "bun": "./src/pty/pty.bun.ts",
       "node": "./src/pty/pty.node.ts",
       "default": "./src/pty/pty.bun.ts"
+    },
+    "#watcher": {
+      "android": "./src/filesystem/watcher.android.ts",
+      "bun": "./src/filesystem/watcher.ts",
+      "node": "./src/filesystem/watcher.ts",
+      "default": "./src/filesystem/watcher.ts"
     },
     "#fff": {
       "bun": "./src/filesystem/fff.bun.ts",

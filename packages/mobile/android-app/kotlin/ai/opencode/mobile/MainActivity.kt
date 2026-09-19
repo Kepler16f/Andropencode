@@ -4,17 +4,27 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.util.Log
 import android.widget.Toast
+import ai.opencode.mobile.bridge.BiometricPlugin
+import ai.opencode.mobile.bridge.FsBridgePlugin
+import ai.opencode.mobile.bridge.ShellBridgePlugin
 import com.getcapacitor.BridgeActivity
 
 /**
  * OpenCode Mobile entry point. Extends Capacitor's BridgeActivity so the
  * existing SolidJS SPA is loaded into the WebView. We additionally start the
- * [OpencodeService] which hosts the Bun runtime + reverse proxy.
+ * [OpencodeService] which hosts the Bun runtime.
  *
- * Phase 1 (this file): only flips on the foreground service. Later phases
- * register Capacitor plugins (FsBridge, ShellBridge, Biometric) here.
+ * The three bridge plugins are registered in the init block (the Capacitor
+ * convention): FsBridge (SAF workspace), ShellBridge (process exec),
+ * Biometric (device-credential-gated secret access).
  */
 class MainActivity : BridgeActivity() {
+    init {
+        registerPlugin(FsBridgePlugin::class.java)
+        registerPlugin(ShellBridgePlugin::class.java)
+        registerPlugin(BiometricPlugin::class.java)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 

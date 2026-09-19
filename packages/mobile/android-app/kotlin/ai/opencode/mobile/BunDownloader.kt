@@ -9,13 +9,16 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * Ensures a Bun binary matching the device's ABI is present under
- * `<filesDir>/bun/`. If the file is missing we download the latest published
- * `bun-linux-aarch64` tarball from GitHub.
+ * Ensures the pinned Bun binary (`bun-v1.3.14`, matching packageManager) is
+ * present under `<filesDir>/bun/`. If missing we download the official
+ * android archive (`bun-linux-aarch64-android.zip`) from oven-sh/bun and
+ * extract it. The device's own `/system/bin/unzip` handles extraction; the
+ * archive unzips as `bun-linux-aarch64-android/bun`, so we walk the tree
+ * rather than match a single member name.
  *
- * Phase 1 keeps it simple (no resume, no checksum verification). Phase 2
- * should switch to an integrity-checked flow: SHA-256 the archive, optionally
- * pin the version, surface download progress to the user.
+ * Phase 1 keeps it simple (no resume, no checksum verification). Phase 3 note:
+ * this is a real dependency of an ONLINE first launch — a user in airplane
+ * mode gets a "Bun not available" notification, which the README documents.
  */
 object BunDownloader {
 
@@ -50,7 +53,7 @@ object BunDownloader {
     }
 
     private fun download(dest: File): Boolean {
-        val src = "https://github.com/oven-sh/bun/releases/download/bun-v$VERSION/bun-linux-aarch64.zip"
+        val src = "https://github.com/oven-sh/bun/releases/download/bun-v$VERSION/bun-linux-aarch64-android.zip"
         Log.i(TAG, "Downloading Bun from $src")
         return runCatching {
             val conn = URL(src).openConnection() as HttpURLConnection
@@ -68,22 +71,42 @@ object BunDownloader {
     }
 
     private fun extract(archive: File, intoDir: File): Boolean {
-        // We rely on the system `unzip` binary present on all Android devices.
-        // The alternative (java.util.zip.ZipInputStream) works too but is more
-        // verbose for a single-file archive.
+        // The official android archive extracts to `bun-linux-aarch64-android/bun`,
+        // so unzip everything and locate the binary instead of matching one
+        // member name. We rely on the system `unzip` binary present on all
+        // Android devices (BunDownloader already leans on it for Phase 1).
         return runCatching {
-            val pb = ProcessBuilder("/system/bin/unzip", "-o", "-q", archive.absolutePath, FILE_NAME, "-d", intoDir.absolutePath)
+            val pb = ProcessBuilder("/system/bin/unzip", "-o", "-q", archive.absolutePath, "-d", intoDir.absolutePath)
                 .redirectErrorStream(true)
             val p = pb.start()
-            val exited = p.waitFor()
-            if (exited != 0) {
-                Log.e(TAG, "unzip exited with $exited")
+            if (p.waitFor() != 0) {
+                Log.e(TAG, "unzip exited with ${p.exitValue()}")
                 return@runCatching false
             }
+            val found = walkForBun(intoDir)
+            if (found == null) {
+                Log.e(TAG, "no bun binary found under ${intoDir.absolutePath}")
+                return@runCatching false
+            }
+            val target = File(intoDir, FILE_NAME)
+            if (found.absolutePath != target.absolutePath) {
+                found.copyTo(target, overwrite = true)
+                found.delete()
+            }
+            target.setExecutable(true)
             true
         }.getOrElse {
             Log.e(TAG, "unzip failed: ${it.message}")
             false
         }
+    }
+
+    private fun walkForBun(dir: File, depth: Int = 0): File? {
+        if (depth > 3) return null
+        dir.listFiles()?.forEach { entry ->
+            if (entry.isFile && entry.name == FILE_NAME) return entry
+            if (entry.isDirectory) walkForBun(entry, depth + 1)?.let { return it }
+        }
+        return null
     }
 }

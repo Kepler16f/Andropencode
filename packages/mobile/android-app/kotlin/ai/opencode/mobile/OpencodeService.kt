@@ -25,7 +25,6 @@ import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.net.InetSocketAddress
-import java.net.ServerSocket
 import java.net.Socket
 
 /**
@@ -42,7 +41,9 @@ import java.net.Socket
  *   3. While the service is alive, the WebView at
  *      http://127.0.0.1:4096 talks to the server directly.
  *
- * Phase 2: server boots + serves SPA. Phase 3 will hook SAF / ripgrep here.
+ * Phase 3: stages native assets (rg / libc++ / pty.node), seeds provider
+ * keys from EncryptedSharedPreferences into the Bun environment, and serves
+ * the PTY WebSocket + event stream on the same loopback.
  */
 class OpencodeService : Service() {
 
@@ -71,7 +72,6 @@ class OpencodeService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var bunProcess: Process? = null
-    private var serverSocket: ServerSocket? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -89,7 +89,6 @@ class OpencodeService : Service() {
     override fun onDestroy() {
         scope.cancel()
         runCatching { bunProcess?.destroy() }
-        runCatching { serverSocket?.close() }
         super.onDestroy()
     }
 
@@ -142,21 +141,16 @@ class OpencodeService : Service() {
             return@runCatching
         }
 
-        // 3. Pre-flight: bind 127.0.0.1:4096 so the WebView proxy has somewhere
-        //    to forward to before Bun is ready.
-        try {
-            serverSocket = ServerSocket(SERVER_PORT, 0, java.net.InetAddress.getByName("127.0.0.1"))
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not bind 127.0.0.1:$SERVER_PORT: ${e.message}")
-            updateNotification("Port $SERVER_PORT unavailable")
-            return@runCatching
-        }
+        // 2b. Stage native assets (ripgrep, pcre2, libc++, node-pty addon).
+        val native = RuntimeAssets.ensureStaged(this, filesDir)
 
-        // 4. Spawn Bun with the opencode server entry. Android's `os.homedir()`
+        // 3. Spawn Bun with the opencode server entry. Android's `os.homedir()`
         //    resolves to "/" or "/data" which makes opencode store config +
         //    sessions in unreachable places; we force HOME / XDG_* to the app's
-        //    private filesDir. Phase 3 also routes the server's stdout/stderr
-        //    into logcat so we can debug without a USB cable.
+        //    private filesDir. Bun is the sole listener on 127.0.0.1:4096 and
+        //    the WebView connects to it directly (no proxy socket in between —
+        //    a reserved ServerSocket would make Bun's bind fail with EADDRINUSE).
+        val tmpDir = File(filesDir, "tmp").apply { mkdirs() }
         val pb = ProcessBuilder(
             bunBinary.absolutePath,
             "run",
@@ -170,16 +164,42 @@ class OpencodeService : Service() {
             // Bun build drops stdio if we don't keep stdin / stdout / stderr
             // attached to something readable.
             environment()["HOME"] = filesDir.absolutePath
+            environment()["TMPDIR"] = tmpDir.absolutePath
             environment()["XDG_DATA_HOME"] = "${filesDir.absolutePath}/.local/share"
             environment()["XDG_CONFIG_HOME"] = "${filesDir.absolutePath}/.config"
             environment()["XDG_STATE_HOME"] = "${filesDir.absolutePath}/.local/state"
             environment()["XDG_CACHE_HOME"] = "${filesDir.absolutePath}/.cache"
+            // Android PATH has no /usr/bin; restore a sane search path and
+            // include Global.Path.bin (`.cache/opencode/bin`) so `which()`
+            // finds the staged rg before trying to download ripgrep.
+            environment()["PATH"] = buildList {
+                addAll(
+                    arrayOf(
+                        "/system/bin",
+                        "/system/xbin",
+                        "/vendor/bin",
+                        "/sbin",
+                        "/apex/com.android.runtime/bin",
+                    ),
+                )
+                native.rg?.parentFile?.let { add(it.absolutePath) }
+            }.joinToString(":")
+            // Dynamic libs for the staged rg / node-pty addon.
+            native.libDir?.let { environment()["LD_LIBRARY_PATH"] = it.absolutePath }
+            // Native PTY addon (arm64-v8a only); absent -> pty.android.ts pipe fallback.
+            native.ptyNode?.let { environment()["OPENCODE_NODE_PTY_PATH"] = it.absolutePath }
+            // Signal to core (ripgrep/binary.ts, pty layer, watcher) that this
+            // process is the Android runtime.
+            environment()["OPENCODE_ANDROID"] = "1"
             // Disable optional features that touch the network or filesystem in
             // ways Android can't satisfy. mDNS in particular needs the
             // unprivileged port range + privileges we don't have.
             environment()["OPENCODE_DISABLE_MDNS"] = "1"
             environment()["OPENCODE_DISABLE_UPDATE_CHECK"] = "1"
             environment()["OPENCODE_SERVER_PASSWORD"] = "" // disable auth in dev
+            // Provider API keys stored via BiometricPlugin are seeded verbatim
+            // so sessions authenticate without editing app code.
+            environment().putAll(SecureStore.envForService(this@OpencodeService))
         }
         bunProcess = pb.start()
         Log.i(TAG, "Bun launching opencode server (pid=${bunProcess!!.pid()})…")

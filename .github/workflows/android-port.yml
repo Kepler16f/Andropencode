@@ -208,17 +208,21 @@ jobs:
           mv dist/*.apk dist/andropencode-debug.apk 2>/dev/null || true
           ls -la dist/
 
-      - name: Upload APK
-        # GitHub Actions requires artefacts to ship inside a zip — the path
-        # glob below picks up the .apk we built and zips it as the sole file.
-        # The zip is one level deep only; consumers can `unzip` and grab the
-        # .apk immediately. For users that want the apk directly (without a
-        # zip wrapper) the publish job below attaches the same file to the
-        # GitHub Release as a raw download.
-        uses: actions/upload-artifact@v4
+      - name: Upload APK (raw, no zip wrapper)
+        # actions/upload-artifact@v7 introduced `archive: false` which skips
+        # the zip step and uploads the file as-is. Two constraints from the
+        # release notes:
+        #   * Only single files are supported. The glob below must resolve
+        #     to exactly one APK or the step fails.
+        #   * The `name` parameter is ignored. The artifact's display name
+        #     is the uploaded file's basename (andropencode-debug.apk).
+        # Result: the artifact is downloadable as a raw .apk with no extra
+        # unzip step required.
+        uses: actions/upload-artifact@v7
         with:
-          name: andropencode-${{ matrix.abi }}-${{ steps.patch.outputs.version_name }}
+          name: andropencode-${{ matrix.abi }}-${{ steps.patch.outputs.version_name }}.apk
           path: packages/mobile/android/dist/andropencode-debug.apk
+          archive: false
           if-no-files-found: error
 
   publish:
